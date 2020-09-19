@@ -1,5 +1,6 @@
 // My Modules
 import compareBufferStream from './lib/helpers/compare-buffer-stream.js'
+import firstTruthy from './lib/helpers/first-truthy.js'
 
 // Npm Modules
 import areStreamsSame from 'are-streams-same'
@@ -8,7 +9,7 @@ import rollupBabelPlugin from '@rollup/plugin-babel'
 
 // Node.js Modules
 import { createReadStream, createWriteStream } from 'fs'
-import { readdir, writeFile, mkdir } from 'fs/promises'
+import { readdir, writeFile, mkdir, readFile } from 'fs/promises'
 import { join, dirname } from 'path'
 import { createHash } from 'crypto'
 import { once } from 'events'
@@ -57,6 +58,7 @@ const build = async () => {
 
       const inputJsHashPath = join(distPagePath, './input-js-hash.dat')
       const inputJsPath = join(libPagePath, './index.js')
+      const inputJsRefsPath = join(libPagePath, './input-js-files')
 
       const browserJsHashPath = join(distPagePath, './browser-js-hash.dat')
       const browserJsPath = join(distPagePath, './browser.js')
@@ -98,6 +100,7 @@ const build = async () => {
           }
 
           if (!noDistPage) {
+            // TODO Start everything ASAP
             const browserJsHash = createReadStream(browserJsHashPath)
             try {
               const different = await compareBufferStream(outputHash, browserJsHash)
@@ -120,56 +123,87 @@ const build = async () => {
         })()
 
         const generateInstructionJs = (async () => {
+          const output = (async () => {
+            return (await ((await bundle).generate({
+              format: 'es'
+            }))).output[0]
+          })()
 
+          if (!noDistPage) {
+
+          }
         })()
 
         await Promise.all([generateBrowserJs, generateInstructionJs])
       }
 
       if (!noDistPage) {
-        // TODO Keep a hash of every referenced file
-        const changedBuffer = await new Promise((resolve, reject) => {
-          const oldInputJsHash = createReadStream(inputJsHashPath)
-          const inputJs = createReadStream(inputJsPath)
-          const newInputJsHash = inputJs.pipe(createHash('sha256'))
-          const newInputJsHashBuff = (async () => {
-            return (await once(newInputJsHash, 'data'))[0]
+        const getChangedBuff = async (inputPath, hashPath) => new Promise((resolve, reject) => {
+          const oldInputHash = createReadStream(hashPath)
+          const input = createReadStream(inputPath)
+          const newInputHash = input.pipe(createHash('sha256'))
+          const newInputHashBuff = (async () => {
+            return (await once(newInputHash, 'data'))[0]
           })()
 
-          oldInputJsHash.on('error', err => {
+          oldInputHash.on('error', err => {
             if (err.code === 'ENOENT') {
-              resolve(newInputJsHashBuff)
+              resolve(newInputHashBuff)
             } else {
               reject(err)
-              inputJs.destroy(err)
+              input.destroy(err)
             }
           })
 
-          inputJs.on('error', err => {
+          input.on('error', err => {
             if (err.code === 'ENOENT') {
               reject(new Error('Input js file doesn\'t exist.'))
             } else {
               reject(err)
             }
-            oldInputJsHash.destroy(err)
+            oldInputHash.destroy(err)
           })
 
-          newInputJsHash.on('error', err => {
+          newInputHash.on('error', err => {
             reject(err)
           })
 
-          areStreamsSame(oldInputJsHash, newInputJsHash).then(({ same }) => {
+          areStreamsSame(oldInputHash, newInputHash).then(({ same }) => {
             if (same) {
               resolve(false)
             } else {
-              resolve(newInputJsHashBuff)
+              resolve(newInputHashBuff)
             }
           })
         })
-        if (changedBuffer) {
-          await Promise.all([writeFile(inputJsHashPath, changedBuffer), buildJs()])
+
+        const inputJsChangedBuff = getChangedBuff(inputJsPath, inputJsHashPath)
+        const updateInputJsHash = (async () => {
+          const buff = await inputJsChangedBuff
+          if (buff) {
+            await writeFile(inputJsHashPath, buff)
+          }
+        })()
+        const updateRefHashPromises = []
+        const refFilesChanged = (async () => {
+          try {
+            const inputJsRefs = (await readFile(inputJsRefsPath))
+            console.log(JSON.parse(inputJsRefs))
+          } catch (e) {
+            if (e.code === 'ENOENT') {
+              console.log('no refs')
+              return true
+            } else {
+              throw e
+            }
+          }
+        })()
+
+        if (await firstTruthy([inputJsChangedBuff, refFilesChanged])) {
+          await Promise.all([updateInputJsHash, ...updateRefHashPromises, buildJs()])
+          console.log('rebuilt')
         } else {
-          console.log('No changes')
+          console.log('no inputs changed')
         }
       } else {
         await mkdir(distPagePath, { recursive: true })
