@@ -68,57 +68,66 @@ const build = async () => {
           plugins: [babelPlugin]
         })
 
-        const outputCode = (async () => {
-          return (await (await bundle).generate({
-            format: 'es',
-            paths: {
-              react: '/scripts/react.js'
-            }
-          })).output[0].code
-        })()
-
-        const outputHash = (async () => {
-          return createHash('sha256')
-            .update(await outputCode)
-            .digest()
-        })()
-
-        const writeBrowserJs = async () => {
-          const writeOutputHash = (async () => {
-            // await writeFile(browserJsHashPath, await outputHash)
+        const generateBrowserJs = (async () => {
+          const outputCode = (async () => {
+            return (await (await bundle).generate({
+              format: 'es',
+              paths: {
+                react: '/scripts/react.js'
+              }
+            })).output[0].code
           })()
 
-          const writeBrowserJs = (async () => {
-            writeFile(browserJsPath, await outputCode)
+          const outputHash = (async () => {
+            return createHash('sha256')
+              .update(await outputCode)
+              .digest()
           })()
 
-          await Promise.all([writeOutputHash, writeBrowserJs])
-          console.log('done writing browserJs')
-        }
+          const writeBrowserJs = async () => {
+            const writeOutputHash = (async () => {
+              await writeFile(browserJsHashPath, await outputHash)
+            })()
 
-        if (!noDistPage) {
-          const browserJsHash = createReadStream(browserJsHashPath)
-          try {
-            const different = await compareBufferStream(outputHash, browserJsHash)
-            if (different) {
-              writeBrowserJs()
-            } else {
-              console.log('same hash')
-            }
-          } catch (e) {
-            if (e.code === 'ENOENT') {
-              console.log('no hash')
-              writeBrowserJs()
-            } else {
-              throw e
-            }
+            const writeBrowserJs = (async () => {
+              writeFile(browserJsPath, await outputCode)
+            })()
+
+            await Promise.all([writeOutputHash, writeBrowserJs])
+            console.log('done writing browserJs')
           }
-        } else {
-          console.log('no dist page')
-        }
+
+          if (!noDistPage) {
+            const browserJsHash = createReadStream(browserJsHashPath)
+            try {
+              const different = await compareBufferStream(outputHash, browserJsHash)
+              if (different) {
+                await writeBrowserJs()
+              } else {
+                console.log('same hash')
+              }
+            } catch (e) {
+              if (e.code === 'ENOENT') {
+                console.log('no hash')
+                await writeBrowserJs()
+              } else {
+                throw e
+              }
+            }
+          } else {
+            await writeBrowserJs()
+          }
+        })()
+
+        const generateInstructionJs = (async () => {
+
+        })()
+
+        await Promise.all([generateBrowserJs, generateInstructionJs])
       }
 
       if (!noDistPage) {
+        // TODO Keep a hash of every referenced file
         const changedBuffer = await new Promise((resolve, reject) => {
           const oldInputJsHash = createReadStream(inputJsHashPath)
           const inputJs = createReadStream(inputJsPath)
@@ -158,8 +167,7 @@ const build = async () => {
           })
         })
         if (changedBuffer) {
-          // await writeFile(inputJsHashPath, changedBuffer)
-          await buildJs()
+          await Promise.all([writeFile(inputJsHashPath, changedBuffer), buildJs()])
         } else {
           console.log('No changes')
         }
@@ -170,9 +178,7 @@ const build = async () => {
           .pipe(createHash('sha256'))
           .pipe(createWriteStream(inputJsHashPath))
 
-        await once(hashStream, 'finish')
-
-        await buildJs()
+        await Promise.all([once(hashStream, 'finish'), buildJs()])
       }
     })()
   }
