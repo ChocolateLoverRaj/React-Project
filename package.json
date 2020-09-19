@@ -11,7 +11,8 @@
   "scripts": {
     "start": "node --experimental-modules --experimental-import-meta-resolve lib/server.js",
     "build": "rollup -c",
-    "lint": "standard"
+    "lint": "standard",
+    "lint:fix": "standard --fix"
   },
   "author": "",
   "license": "MIT",

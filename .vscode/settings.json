@@ -2,5 +2,12 @@
     "cSpell.words": [
         "billjs",
         "replacestream"
-    ]
+    ],
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false,
+    "javascript.format.insertSpaceBeforeFunctionParenthesis": true,
+    "javascript.format.semicolons": "remove",
+    "javascript.preferences.importModuleSpecifierEnding": "js",
+    "javascript.preferences.quoteStyle": "single",
+    "javascript.format.insertSpaceAfterConstructor": true
 }
