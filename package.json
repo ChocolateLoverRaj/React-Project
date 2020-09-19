@@ -10,19 +10,22 @@
   },
   "scripts": {
     "start": "node --experimental-modules --experimental-import-meta-resolve lib/server.js",
-    "build": "rollup -c"
+    "build": "rollup -c",
+    "lint": "standard"
   },
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.17.1",
-    "react": "^16.13.1",
-    "react-dom": "^16.13.1",
     "@babel/core": "^7.11.6",
     "@babel/plugin-proposal-class-properties": "^7.10.4",
     "@babel/preset-react": "^7.10.4",
+    "@rollup/plugin-babel": "^5.2.1",
+    "are-streams-same": "^1.0.2",
     "chokidar": "^3.4.2",
+    "express": "^4.17.1",
+    "react": "^16.13.1",
+    "react-dom": "^16.13.1",
     "rollup": "^2.26.11",
-    "rollup-plugin-babel": "^4.4.0"
+    "standard": "^14.3.4"
   }
 }
