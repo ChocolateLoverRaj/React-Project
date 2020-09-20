@@ -19,6 +19,161 @@ const __dirname = dirname(import.meta.url.slice(8))
 const babelPlugin = rollupBabelPlugin.getBabelInputPlugin({ babelHelpers: 'bundled' })
 
 const build = async () => {
+  // Helper functions
+  // Hashes a buffer
+  const hash = buff => createHash('sha256')
+    .update(buff)
+    .digest()
+
+  // If a file was changed, returns the changed hash
+  const getChangedBuff = async (inputPath, hashPath) => {
+    // The input hash
+    const inputHash = (async () => hash(await readFile(inputPath)))()
+
+    // The hash stream
+    const hashStream = createReadStream(hashPath)
+
+    // Hash stream error
+    const hashStreamError = once(hashStream, 'error')
+
+    // If there was an error with the hash stream
+    const nonExistentOldHash = (async () => {
+      if ((await hashStreamError)[0].code === 'ENOENT') {
+        return true
+      }
+    })()
+
+    // Compare the inputHash to the hash stream
+    try {
+      return await compareBufferStream(inputHash, hashStream) ? false : await inputHash
+    } catch (e) {
+      if (await nonExistentOldHash) {
+        return await inputHash
+      } else {
+        throw e
+      }
+    }
+  }
+
+  // The paths to the lib and dist dirs
+  const libPagesPath = join(__dirname, './lib/browser/components/pages/')
+  const distPagesPath = join(__dirname, './dist/browser/components/pages/')
+
+  // The files in the lib and dist dirs
+  const libPagesDir = readdir(libPagesPath)
+  const distPagesDir = readdir(distPagesPath)
+
+  // Whether or not the lib and dist dirs exist
+  const libPagesExists = (async () => {
+    try {
+      await libPagesDir
+      return true
+    } catch (e) {
+      if (e.code === 'ENOENT') {
+        return false
+      }
+    }
+  })()
+  const distPagesExists = (async () => {
+    try {
+      await distPagesDir
+      return true
+    } catch (e) {
+      if (e.code === 'ENOENT') {
+        return false
+      }
+    }
+  })()
+
+  // Build the pages
+  const buildPages = (async () => {
+    // All the page build promises
+    const pageBuildPromises = []
+
+    // Loop through all the pages
+    for (const page of await libPagesDir) {
+      // Add the individual page build to the page build promises
+      pageBuildPromises.push((async () => {
+        // The paths to the lib and dist page
+        const libPagePath = join(libPagesPath, `./${page}`)
+        const distPagePath = join(distPagesPath, `./${page}`)
+
+        // The file paths in the page
+        const inputJsPath = join(libPagePath, './index.js')
+        const inputJsHashPath = join(distPagePath, './index-js-hash.dat')
+
+        // Whether or not the page exists in the dist pages dir
+        const distPageExists = (async () => await distPagesExists && (await distPagesDir).includes(page))()
+
+        // Creates the page dir
+        const createPageDir = (async () => {
+          if (!await distPageExists) {
+            await mkdir(distPagePath, { recursive: true })
+          }
+        })()
+
+        // The changed buff
+        const inputJsHash = (async () => await distPageExists
+          ? await getChangedBuff(inputJsPath, inputJsHashPath)
+          : hash(await readFile(inputJsPath))
+        )()
+
+        // Write the changed buff
+        const writeInputJsHash = (async () => {
+          const buff = await inputJsHash
+          if (buff) {
+            // Wait for the createPageDir promise
+            console.log('changes', page)
+            await createPageDir
+            await writeFile(inputJsHashPath, buff)
+          } else {
+            console.log('no changes', page)
+          }
+        })()
+
+        // Wait for the inputJsHash to be written
+
+        await writeInputJsHash
+      })())
+    }
+
+    // Wait for all the pages to be built
+    await Promise.all(pageBuildPromises)
+  })()
+
+  // Await the promises
+  await Promise.all([
+    libPagesExists,
+    distPagesExists,
+    buildPages
+  ]);
+
+  // Lib and dist dirs error handlers
+  // Throw errors for missing libPages
+  (async () => {
+    try {
+      await libPagesDir
+    } catch (e) {
+      if (await libPagesExists === false) {
+        throw new Error('Lib pages dir doesn\'t exist')
+      } else {
+        throw e
+      }
+    }
+  })();
+  // Throw errors for non 'ENOENT' distPages errors
+  (async () => {
+    try {
+      await distPagesDir
+    } catch (e) {
+      if (await distPagesExists !== false) {
+        throw e
+      }
+    }
+  })()
+}
+
+const buildZ = async () => {
   // Check hashes
   // If the index.js file has changed, then redo the output index.js, app.html
   // If the index.html file has changed, then redo the index.html
@@ -100,7 +255,6 @@ const build = async () => {
           }
 
           if (!noDistPage) {
-            // TODO Start everything ASAP
             const browserJsHash = createReadStream(browserJsHashPath)
             try {
               const different = await compareBufferStream(outputHash, browserJsHash)
@@ -218,4 +372,6 @@ const build = async () => {
   }
 }
 
-build()
+console.log('Starting Build')
+console.time('build')
+build().then(console.timeEnd.bind(undefined, 'build'))

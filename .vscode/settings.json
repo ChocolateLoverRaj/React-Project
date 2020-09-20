@@ -9,5 +9,6 @@
     "javascript.format.semicolons": "remove",
     "javascript.preferences.importModuleSpecifierEnding": "js",
     "javascript.preferences.quoteStyle": "single",
-    "javascript.format.insertSpaceAfterConstructor": true
+    "javascript.format.insertSpaceAfterConstructor": true,
+    "javascript.validate.enable": false
 }
