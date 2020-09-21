@@ -21,7 +21,7 @@
     "@babel/plugin-proposal-class-properties": "^7.10.4",
     "@babel/preset-react": "^7.10.4",
     "@rollup/plugin-babel": "^5.2.1",
-    "are-streams-same": "^1.0.2",
+    "@rollup/plugin-strip": "^2.0.0",
     "chokidar": "^3.4.2",
     "express": "^4.17.1",
     "react": "^16.13.1",

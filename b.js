@@ -1,14 +1,18 @@
 // My Modules
 import compareBufferStream from './lib/helpers/compare-buffer-stream.js'
-import firstTruthy from './lib/helpers/first-truthy.js'
 
 // Npm Modules
-import areStreamsSame from 'are-streams-same'
+
+// Rollup Stuff
 import { rollup } from 'rollup'
 import rollupBabelPlugin from '@rollup/plugin-babel'
+import rollupStripPlugin from '@rollup/plugin-strip'
+
+// Other stuff
+import ReactServer from 'react-dom/server.node.js'
 
 // Node.js Modules
-import { createReadStream, createWriteStream } from 'fs'
+import { createReadStream } from 'fs'
 import { readdir, writeFile, mkdir, readFile } from 'fs/promises'
 import { join, dirname } from 'path'
 import { createHash } from 'crypto'
@@ -17,9 +21,14 @@ import { once } from 'events'
 const __dirname = dirname(import.meta.url.slice(8))
 
 const babelPlugin = rollupBabelPlugin.getBabelInputPlugin({ babelHelpers: 'bundled' })
+const stripPlugin = rollupStripPlugin({ sourceMap: false })
 
 const build = async () => {
   // Helper functions
+
+  // Get an esm path from a fs path
+  const getEsmPath = fsPath => `file://${fsPath}`
+
   // Hashes a buffer
   const hash = buff => createHash('sha256')
     .update(buff)
@@ -106,13 +115,19 @@ const build = async () => {
 
         // The file paths in the page
         const inputJsPath = join(libPagePath, './index.js')
-        const inputJsHashPath = join(distPagePath, './index-js-hash.dat')
+        const inputJsHashPath = join(distPagePath, './input-js-hash.dat')
 
         // The browserJs path
         const browserJsPath = join(distPagePath, './browser.js')
         const browserJsHashPath = join(distPagePath, './browser-js-hash.dat')
 
-        // The instructionJ
+        // The instructionsJs path
+        const instructionsJsPath = join(distPagePath, './instructions.js')
+        const instructionsJsHashPath = join(distPagePath, './instructions-js-hash.dat')
+
+        // The appHtml path
+        const appHtmlPath = join(distPagePath, './app.html')
+        const appHtmlHashPath = join(distPagePath, './app-html-hash.dat')
 
         // Whether or not the page exists in the dist pages dir
         const distPageExists = (async () => await distPagesExists && (await distPagesDir).includes(page))()
@@ -126,6 +141,7 @@ const build = async () => {
 
         // Write the inputJsHash
         const {
+          // TODO: Check all files referenced by inputJs
           inputJsHash,
           writeInputJsHash
         } = (() => {
@@ -165,7 +181,10 @@ const build = async () => {
         const bundle = rollup({
           input: inputJsPath,
           external: 'react',
-          plugins: [babelPlugin]
+          plugins: [
+            babelPlugin,
+            stripPlugin
+          ]
         })
 
         // Write browserJs and browserJsHash
@@ -231,10 +250,139 @@ const build = async () => {
           await Promise.all([writeBrowserJsHash, writeBrowserJs])
         })()
 
+        // Do the necessary steps to build appHtml
+        // TODO: Build index.html too, and check if it has <App></App>
+        const buildAppHtml = (async () => {
+          // Build the instructionsJs
+          const {
+            instructionsJsHash,
+            buildInstructionsJs
+          } = (() => {
+            // instructionsJsCode
+            const instructionsJsCode = (async () => {
+              // The instructionsJs build
+              const buildInstructionsJs = (async () => (await bundle).generate({
+                format: 'es'
+              }))()
+
+              // The instructionsJs code promise
+              const codePromise = (async () => (await buildInstructionsJs).output[0].code)()
+
+              // Return the codePromise
+              return await codePromise
+            })()
+
+            // instructionsJsHash
+            const instructionsJsHash = (async () => {
+              // The new hash
+              const newHash = (async () => hash(await instructionsJsCode))()
+
+              // The changed buff
+              const changedBuff = getChangedBuffWithInputHash(newHash, instructionsJsHashPath)
+
+              // The hash to use
+              const hashToUse = (async () => await distPageExists
+                ? await changedBuff
+                : await newHash
+              )()
+
+              // Wait fore the hashToUse
+              return await hashToUse
+            })()
+
+            // write the instructionsJsHash
+            const writeHash = (async () => {
+              const buff = await inputJsHash && await instructionsJsHash
+              if (buff) {
+                console.log('changes', 'instructions.js', page)
+                await createPageDir
+                await writeFile(instructionsJsHashPath, buff)
+              } else {
+                console.log('no changes', 'instructions.js', page)
+              }
+            })()
+
+            // Write the file
+            const writeInstructionsJs = (async () => {
+              if (await inputJsHash && await instructionsJsHash) {
+                await createPageDir
+                await writeFile(instructionsJsPath, await instructionsJsCode)
+              }
+            })()
+
+            // Both write hash and write file
+            const buildInstructionsJs = Promise.all([writeHash, writeInstructionsJs])
+
+            // Return the necessary promises
+            return {
+              instructionsJsHash,
+              buildInstructionsJs
+            }
+          })()
+
+          // Build the appHtml
+          const buildAppHtml = (async () => {
+            // The actual html
+            const appHtml = (async () => {
+              await buildInstructionsJs
+              const { default: appComponent } = await import(getEsmPath(instructionsJsPath))
+              return ReactServer.renderToString(appComponent)
+            })()
+
+            // The hash
+            const appHtmlHash = (async () => {
+              // The new hash
+              const newHash = (async () => hash(await appHtml))()
+
+              // The changedBuff
+              const changedBuff = getChangedBuffWithInputHash(newHash, appHtmlHashPath)
+
+              // The hash to use
+              const hashToUse = (async () => await distPageExists
+                ? await changedBuff
+                : await newHash
+              )()
+
+              // Return the hash to use
+              return await hashToUse
+            })()
+
+            // Write the hash
+            const writeHash = (async () => {
+              const buff = await inputJsHash && await instructionsJsHash && await appHtmlHash
+              if (buff) {
+                console.log('changes', 'app.html', page)
+                await createPageDir
+                await writeFile(appHtmlHashPath, buff)
+              } else {
+                console.log('no changes', 'app.html', page)
+              }
+            })()
+
+            // Write the file
+            const writeAppHtml = (async () => {
+              if (await inputJsHash && await instructionsJsHash && await appHtmlHash) {
+                await createPageDir
+                await writeFile(appHtmlPath, await appHtml)
+              }
+            })()
+
+            // Wait for the hash and appHtml to be written
+            await Promise.all([writeHash, writeAppHtml])
+          })()
+
+          // Wait for the necessary tasks to be done
+          await Promise.all([
+            buildInstructionsJs,
+            buildAppHtml
+          ])
+        })()
+
         // Wait for the necessary tasks
         await Promise.all([
           writeInputJsHash,
-          buildBrowserJs
+          buildBrowserJs,
+          buildAppHtml
         ])
       })())
     }
