@@ -7,5 +7,8 @@
   "javascript.preferences.quoteStyle": "single",
   "javascript.format.insertSpaceAfterConstructor": true,
   "javascript.validate.enable": true,
-  "typescript.preferences.importModuleSpecifierEnding": "js"
+  "typescript.preferences.importModuleSpecifierEnding": "js",
+  "cSpell.words": [
+    "ansicolor"
+  ]
 }
