@@ -1,5 +1,5 @@
 // My Modules
-import compareBufferStream from './lib/helpers/compare-buffer-stream.js'
+import compareBufferStream from '../lib/helpers/compare-buffer-stream.js'
 
 // Npm Modules
 
@@ -74,8 +74,8 @@ const build = async () => {
   const libCommonPath = join(__dirname, './lib/browser/components/common')
 
   // The paths to the lib and dist dirs
-  const libPagesPath = join(__dirname, './lib/browser/components/pages/')
-  const distPagesPath = join(__dirname, './dist/browser/components/pages/')
+  const libPagesPath = join(__dirname, '../lib/browser/components/pages/')
+  const distPagesPath = join(__dirname, '../dist/browser/components/pages/')
 
   // The files in the lib and dist dirs
   const libPagesDir = readdir(libPagesPath)
