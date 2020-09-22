@@ -70,6 +70,9 @@ const build = async () => {
     return await getChangedBuffWithInputHash(inputHash, hashPath)
   }
 
+  // The path to the lib common dir
+  const libCommonPath = join(__dirname, './lib/browser/components/common')
+
   // The paths to the lib and dist dirs
   const libPagesPath = join(__dirname, './lib/browser/components/pages/')
   const distPagesPath = join(__dirname, './dist/browser/components/pages/')
@@ -116,6 +119,10 @@ const build = async () => {
         // The file paths in the page
         const inputJsPath = join(libPagePath, './index.js')
         const inputJsHashPath = join(distPagePath, './input-js-hash.dat')
+
+        // The references paths
+        const referencesJsonPath = join(distPagePath, './references.json')
+        const referencesJsonHashPath = join(distPagePath, './references-json-hash.dat')
 
         // The browserJs path
         const browserJsPath = join(distPagePath, './browser.js')
@@ -255,22 +262,17 @@ const build = async () => {
         const buildAppHtml = (async () => {
           // Build the instructionsJs
           const {
+            instructionsJsOutput,
             instructionsJsHash,
-            buildInstructionsJs
+            buildInstructionsJs,
           } = (() => {
+            // The instructionsJs build
+            const instructionsJsOutput = (async () => (await bundle).generate({
+              format: 'es'
+            }))()
+
             // instructionsJsCode
-            const instructionsJsCode = (async () => {
-              // The instructionsJs build
-              const buildInstructionsJs = (async () => (await bundle).generate({
-                format: 'es'
-              }))()
-
-              // The instructionsJs code promise
-              const codePromise = (async () => (await buildInstructionsJs).output[0].code)()
-
-              // Return the codePromise
-              return await codePromise
-            })()
+            const instructionsJsCode = (async () => (await instructionsJsOutput).output[0].code)()
 
             // instructionsJsHash
             const instructionsJsHash = (async () => {
@@ -315,9 +317,72 @@ const build = async () => {
 
             // Return the necessary promises
             return {
+              instructionsJsOutput,
               instructionsJsHash,
               buildInstructionsJs
             }
+          })()
+
+          // Build referencesJson
+          const buildReferencesJson = (async () => {
+            // References string
+            const referencesString = (async () => {
+              // get the output modules
+              const instructionsJsModules = (await instructionsJsOutput).output[0].modules
+
+              // Check the modules
+              const references = []
+              for (const reference in instructionsJsModules) {
+                const goodPath = reference.startsWith(libPagePath) || reference.startsWith(libCommonPath)
+                if (goodPath) {
+                  references.push(reference)
+                } else {
+                  throw new Error('Reference found with a non common or page path.')
+                }
+              }
+
+              // The referencesString
+              const referencesString = JSON.stringify(references)
+              return referencesString
+            })()
+
+            // The hash
+            const referencesHash = (async () => {
+              // The new hash
+              const newHash = (async () => hash(await referencesString))()
+
+              // The changedBuff
+              const changedBuff = getChangedBuffWithInputHash(newHash, referencesJsonHashPath)
+
+              // Return the hash to use
+              return await distPageExists
+                ? await changedBuff
+                : await newHash
+            })()
+
+            // Write the hash
+            const writeHash = (async () => {
+              const buff = await inputJsHash && await referencesHash
+              if (buff) {
+                console.log('changes', 'references.json', page)
+                await createPageDir
+                await writeFile(referencesJsonHashPath, buff)
+              }
+              else {
+                console.log('no changes', 'references.json', page)
+              }
+            })()
+
+            // Write the referencesJson
+            const write = (async () => {
+              if (await inputJsHash && await referencesHash) {
+                await createPageDir
+                await writeFile(referencesJsonPath, await referencesString)
+              }
+            })()
+
+            // Wait for the hash and file to be written
+            await Promise.all([writeHash, write])
           })()
 
           // Build the appHtml
@@ -374,7 +439,8 @@ const build = async () => {
           // Wait for the necessary tasks to be done
           await Promise.all([
             buildInstructionsJs,
-            buildAppHtml
+            buildReferencesJson,
+            buildAppHtml,
           ])
         })()
 
