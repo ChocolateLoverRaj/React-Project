@@ -1,5 +1,8 @@
 // My Modules
-import compareBufferStream from '../lib/helpers/compare-buffer-stream.js'
+import getEsmPath from '../lib/helpers/get-esm-path.js'
+import hash from '../lib/helpers/hash.js'
+import getChangedBuffWithInputHash from '../lib/helpers/get-changed-hash.js'
+import getChangedBuffWithInputPath from '../lib/helpers/get-changed-path.js'
 
 // Npm Modules
 
@@ -12,70 +15,29 @@ import rollupStripPlugin from '@rollup/plugin-strip'
 import ReactServer from 'react-dom/server.node.js'
 
 // Node.js Modules
-import { createReadStream } from 'fs'
 import { readdir, writeFile, mkdir, readFile } from 'fs/promises'
-import { join, dirname } from 'path'
-import { createHash } from 'crypto'
-import { once } from 'events'
+import { join, dirname, relative } from 'path'
 
 const __dirname = dirname(import.meta.url.slice(8))
 
-const babelPlugin = rollupBabelPlugin.getBabelInputPlugin({ babelHelpers: 'bundled' })
+const babelPlugin = rollupBabelPlugin.getBabelInputPlugin({
+  babelHelpers: 'bundled',
+  presets: ['@babel/preset-react'],
+  plugins: ['@babel/plugin-proposal-class-properties']
+})
 const stripPlugin = rollupStripPlugin({ sourceMap: false })
 
 const build = async () => {
-  // Helper functions
-
-  // Get an esm path from a fs path
-  const getEsmPath = fsPath => `file://${fsPath}`
-
-  // Hashes a buffer
-  const hash = buff => createHash('sha256')
-    .update(buff)
-    .digest()
-
-  // If some hash doesn't match a hash stream, returns the changed hash
-  const getChangedBuffWithInputHash = async (inputHash, hashPath) => {
-    // The hash stream
-    const hashStream = createReadStream(hashPath)
-
-    // Hash stream error
-    const hashStreamError = once(hashStream, 'error')
-
-    // If there was an error with the hash stream
-    const nonExistentOldHash = (async () => {
-      if ((await hashStreamError)[0].code === 'ENOENT') {
-        return true
-      }
-    })()
-
-    // Compare the inputHash to the hash stream
-    try {
-      return await compareBufferStream(inputHash, hashStream) ? false : await inputHash
-    } catch (e) {
-      if (await nonExistentOldHash) {
-        return await inputHash
-      } else {
-        throw e
-      }
-    }
-  }
-
-  // If a file was changed, returns the changed hash
-  const getChangedBuffWithInputPath = async (inputPath, hashPath) => {
-    // Create an input hash promise
-    const inputHash = (async () => hash(await readFile(inputPath)))()
-
-    // Use the other func
-    return await getChangedBuffWithInputHash(inputHash, hashPath)
-  }
+  // The components path
+  const libComponentsPath = join(__dirname, '../lib/browser/components')
+  const distComponentsPath = join(__dirname, '../dist/browser/components')
 
   // The path to the lib common dir
-  const libCommonPath = join(__dirname, './lib/browser/components/common')
+  const libCommonPath = join(libComponentsPath, './common')
 
   // The paths to the lib and dist dirs
-  const libPagesPath = join(__dirname, '../lib/browser/components/pages/')
-  const distPagesPath = join(__dirname, '../dist/browser/components/pages/')
+  const libPagesPath = join(libComponentsPath, './pages/')
+  const distPagesPath = join(distComponentsPath, './pages/')
 
   // The files in the lib and dist dirs
   const libPagesDir = readdir(libPagesPath)
@@ -264,7 +226,7 @@ const build = async () => {
           const {
             instructionsJsOutput,
             instructionsJsHash,
-            buildInstructionsJs,
+            buildInstructionsJs
           } = (() => {
             // The instructionsJs build
             const instructionsJsOutput = (async () => (await bundle).generate({
@@ -335,7 +297,7 @@ const build = async () => {
               for (const reference in instructionsJsModules) {
                 const goodPath = reference.startsWith(libPagePath) || reference.startsWith(libCommonPath)
                 if (goodPath) {
-                  references.push(reference)
+                  references.push(relative(libComponentsPath, reference))
                 } else {
                   throw new Error('Reference found with a non common or page path.')
                 }
@@ -367,8 +329,7 @@ const build = async () => {
                 console.log('changes', 'references.json', page)
                 await createPageDir
                 await writeFile(referencesJsonHashPath, buff)
-              }
-              else {
+              } else {
                 console.log('no changes', 'references.json', page)
               }
             })()
@@ -440,7 +401,7 @@ const build = async () => {
           await Promise.all([
             buildInstructionsJs,
             buildReferencesJson,
-            buildAppHtml,
+            buildAppHtml
           ])
         })()
 

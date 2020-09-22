@@ -6,5 +6,6 @@
   "javascript.preferences.importModuleSpecifierEnding": "js",
   "javascript.preferences.quoteStyle": "single",
   "javascript.format.insertSpaceAfterConstructor": true,
-  "javascript.validate.enable": true
+  "javascript.validate.enable": true,
+  "typescript.preferences.importModuleSpecifierEnding": "js"
 }
