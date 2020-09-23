@@ -1,4 +1,4 @@
-import build from './build.js'
+import build from './index.js'
 
 console.log('Starting Build')
 console.time('build')
