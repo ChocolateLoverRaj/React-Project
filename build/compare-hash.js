@@ -7,8 +7,6 @@ const compare = (newHash, hashPath, waitFor) => {
   // The changed buff
   const changedBuff = getChangedBuffWithInputHash(newHash, hashPath)
 
-  console.log(hashPath)
-
   // Write the hash
   const writePromise = (async () => {
     const buff = await changedBuff

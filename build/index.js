@@ -2,15 +2,20 @@
 import getEsmPath from '../lib/helpers/get-esm-path.js'
 import hash from '../lib/helpers/hash.js'
 import getChangedBuffWithInputHash from '../lib/helpers/get-changed-hash.js'
-import getChangedBuffWithInputPath from '../lib/helpers/get-changed-path.js'
 import {
   libComponentsPath,
   libCommonPath,
   libPagesPath,
-  distPagesPath
+  distPagesPath,
+  refHashesPath,
+  commonRefHashesPath,
+  pagesRefHashesPath
 } from './paths.js'
 import exists from '../lib/helpers/exists.js'
 import compareHash from './compare-hash.js'
+import hashFile from '../lib/helpers/hash-file.js'
+import firstTruthy from '../lib/helpers/first-truthy.js'
+import breakSecond from '../lib/helpers/break-second.js'
 
 // Npm Modules
 
@@ -21,11 +26,10 @@ import rollupStripPlugin from '@rollup/plugin-strip'
 
 // Other stuff
 import ReactServer from 'react-dom/server.node.js'
-import ansiColor from 'ansicolor'
 
 // Node.js Modules
 import { readdir, writeFile, mkdir, readFile } from 'fs/promises'
-import { join, relative } from 'path'
+import { join, relative, basename, dirname } from 'path'
 
 const babelPlugin = rollupBabelPlugin.getBabelInputPlugin({
   babelHelpers: 'bundled',
@@ -53,8 +57,11 @@ const build = async () => {
       // Add the individual page build to the page build promises
       pageBuildPromises.push((async () => {
         // The paths to the lib and dist page
-        const libPagePath = join(libPagesPath, `./${page}`)
-        const distPagePath = join(distPagesPath, `./${page}`)
+        const libPagePath = join(libPagesPath, `./${page}/`)
+        const distPagePath = join(distPagesPath, `./${page}/`)
+
+        // The paths to the ref hashes of this page
+        const pageRefHashesPath = join(pagesRefHashesPath, `./${page}/`)
 
         // The file paths in the page
         const inputJsPath = join(libPagePath, './index.js')
@@ -86,23 +93,70 @@ const build = async () => {
           }
         })()
 
-        // Write the inputJsHash
-        const {
-          // TODO: Check all files referenced by inputJs
-          inputJsHash,
-          writeInputJsHash
-        } = (() => {
-          // Compare the new hash to the old hash
-          const newHash = (async () => hash(await readFile(inputJsPath)))()
-          const {
-            hash: inputJsHash,
-            writePromise: writeInputJsHash
-          } = compareHash(newHash, inputJsHashPath, createPageDir)
+        // Create the ref hashes dir
+        const createCommonRefHashesDir = mkdir(commonRefHashesPath, { recursive: true })
 
-          // Return the inputJsHash and the writePromise
+        // Write the input hashes
+        // TODO update hashes. If a file is no longer referenced, then remove that unnecessary hash. If a new reference is added then create a hash for it.
+        const {
+          inputsChanged,
+          writePromise: writeInputHashes
+        } = (() => {
+          // The strategy for figuring our if an inputs changed makes sense.
+          // There is an array of promises.
+          // As soon as the first one resolves to true, we resolve the main promise
+          // There are also promises for writing them
+
+          // Create the ref hashes dir for this page
+          const createPageRefHashesDir = mkdir(pageRefHashesPath, { recursive: true })
+
+          // The changed hash promises
+          const changedHashes = []
+
+          // The write promises
+          const writePromises = []
+
+          // Check an input and its hash
+          const checkInput = (inputPath, hashPath, waitFor) => {
+            const { hash, writePromise } = compareHash(hashFile(inputPath), hashPath, waitFor)
+            changedHashes.push(hash)
+            writePromises.push(writePromise)
+          }
+
+          // Actually check inputs
+          const inputsChanged = (async () => {
+            // Add the inputJs file
+            checkInput(inputJsPath, inputJsHashPath, createPageDir)
+            // Read the references.json file
+            const refString = readFile(referencesJsonPath)
+            const refExists = await exists(refString)
+            if (refExists) {
+              const refs = JSON.parse(await refString)
+              const commonRefs = new Set()
+              for (const ref of refs) {
+                const refPath = join(libComponentsPath, ref)
+                const hashPathWithExt = join(refHashesPath, ref)
+                const hashDir = dirname(hashPathWithExt)
+                const hashFilename = basename(hashPathWithExt).replace(/-/g, '--').replace(/\./g, '-') + '-hash.dat'
+                const hashPath = join(hashDir, hashFilename)
+
+                if (ref.startsWith('pages')) {
+                  checkInput(refPath, hashPath, createPageRefHashesDir)
+                } else if (!commonRefs.has(ref)) {
+                  checkInput(refPath, hashPath, createCommonRefHashesDir)
+                  commonRefs.add(ref)
+                }
+              }
+            }
+
+            // Return the first truthy changedHash
+            return await firstTruthy(changedHashes)
+          })()
+
+          // Return inputsChanged and writePromises
           return {
-            inputJsHash,
-            writeInputJsHash
+            inputsChanged,
+            writePromise: Promise.all(writePromises)
           }
         })()
 
@@ -119,64 +173,32 @@ const build = async () => {
         // Write browserJs and browserJsHash
         const buildBrowserJs = (async () => {
           // BrowserJs Code
-          const browserJsCode = (async () => {
-            // Build browserJs
-            const buildBrowserJs = (async () => (await bundle).generate({
-              format: 'es',
-              paths: {
-                react: '/scripts/react.js'
-              }
-            }))()
-
-            // Get the code from the first output
-            const codePromise = (async () => (await buildBrowserJs).output[0].code)()
-
-            // Wait for the codePromise
-            return await codePromise
-          })()
-
-          // The hash, if changed
-          const browserJsHash = (async () => {
-            // BrowserJs Hash
-            const newBrowserJsHash = (async () => hash(await browserJsCode))()
-
-            // The changed buff
-            const changedBrowserJsBuff = getChangedBuffWithInputHash(newBrowserJsHash, browserJsHashPath)
-
-            // The hash depending on if the distPage exists
-            const hashToUse = (async () => await distPageExists
-              ? await changedBrowserJsBuff
-              : await newBrowserJsHash
-            )()
-
-            // Wait for the hashToUse promise
-            return await hashToUse
-          })()
-
-          // Write the browserJsHash
-          const writeBrowserJsHash = (async () => {
-            // Remember that if the inputJsHash is unchanged there is no need to build this
-            const buff = await inputJsHash && await browserJsHash
-            if (buff) {
-              console.log('changes', 'browser.js', page)
-              await createPageDir
-              await writeFile(browserJsHashPath, buff)
-            } else {
-              console.log('no changes', 'browser.js', page)
+          const browserJsCode = (async () => (await (await bundle).generate({
+            format: 'es',
+            paths: {
+              react: '/scripts/react.js'
             }
-          })()
+          })).output[0].code)()
+
+          // The new hash
+          const newHash = (async () => hash(await browserJsCode))()
+
+          const {
+            hash: changedHash,
+            writePromise
+          } = compareHash(newHash, browserJsHashPath, createPageDir)
 
           // Write browserJs
           const writeBrowserJs = (async () => {
             // Check that the inputJs and browserJs hashes have changed
-            if (await inputJsHash && await browserJsHash) {
+            if (await breakSecond(inputsChanged, changedHash)) {
               await createPageDir
               await writeFile(browserJsPath, await browserJsCode)
             }
           })()
 
           // Wait for file and hash to be written
-          await Promise.all([writeBrowserJsHash, writeBrowserJs])
+          await Promise.all([writePromise, writeBrowserJs])
         })()
 
         // Do the necessary steps to build appHtml
@@ -216,7 +238,7 @@ const build = async () => {
 
             // write the instructionsJsHash
             const writeHash = (async () => {
-              const buff = await inputJsHash && await instructionsJsHash
+              const buff = await inputsChanged && await instructionsJsHash
               if (buff) {
                 console.log('changes', 'instructions.js', page)
                 await createPageDir
@@ -228,7 +250,7 @@ const build = async () => {
 
             // Write the file
             const writeInstructionsJs = (async () => {
-              if (await inputJsHash && await instructionsJsHash) {
+              if (await inputsChanged && await instructionsJsHash) {
                 await createPageDir
                 await writeFile(instructionsJsPath, await instructionsJsCode)
               }
@@ -257,7 +279,9 @@ const build = async () => {
               for (const reference in instructionsJsModules) {
                 const goodPath = reference.startsWith(libPagePath) || reference.startsWith(libCommonPath)
                 if (goodPath) {
-                  references.push(relative(libComponentsPath, reference))
+                  if (reference !== inputJsPath) {
+                    references.push(relative(libComponentsPath, reference))
+                  }
                 } else {
                   throw new Error('Reference found with a non common or page path.')
                 }
@@ -284,7 +308,7 @@ const build = async () => {
 
             // Write the hash
             const writeHash = (async () => {
-              const buff = await inputJsHash && await referencesHash
+              const buff = await inputsChanged && await referencesHash
               if (buff) {
                 console.log('changes', 'references.json', page)
                 await createPageDir
@@ -296,7 +320,7 @@ const build = async () => {
 
             // Write the referencesJson
             const write = (async () => {
-              if (await inputJsHash && await referencesHash) {
+              if (await inputsChanged && await referencesHash) {
                 await createPageDir
                 await writeFile(referencesJsonPath, await referencesString)
               }
@@ -335,7 +359,7 @@ const build = async () => {
 
             // Write the hash
             const writeHash = (async () => {
-              const buff = await inputJsHash && await instructionsJsHash && await appHtmlHash
+              const buff = await inputsChanged && await instructionsJsHash && await appHtmlHash
               if (buff) {
                 console.log('changes', 'app.html', page)
                 await createPageDir
@@ -347,7 +371,7 @@ const build = async () => {
 
             // Write the file
             const writeAppHtml = (async () => {
-              if (await inputJsHash && await instructionsJsHash && await appHtmlHash) {
+              if (await inputsChanged && await instructionsJsHash && await appHtmlHash) {
                 await createPageDir
                 await writeFile(appHtmlPath, await appHtml)
               }
@@ -367,7 +391,7 @@ const build = async () => {
 
         // Wait for the necessary tasks
         await Promise.all([
-          writeInputJsHash,
+          writeInputHashes,
           buildBrowserJs,
           buildAppHtml
         ])
