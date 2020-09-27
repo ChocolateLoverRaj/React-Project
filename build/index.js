@@ -16,7 +16,7 @@ import hashFile from '../lib/helpers/hash-file.js'
 import firstTruthy from '../lib/helpers/first-truthy.js'
 import breakSecond from '../lib/helpers/break-second.js'
 import getHashPath from './hash-path.js'
-import commonFilter from './common-filter.js'
+import { commonFilter, pageFilter } from './ref-filters.js'
 
 // Npm Modules
 
@@ -125,6 +125,7 @@ const build = async () => {
 
         // The common previous refs
         const oldCommonRefs = (async () => (await oldRefs).filter(commonFilter))()
+        const oldPageRefs = (async () => (await oldRefs).filter(pageFilter))()
 
         // Write the input hashes
         const {
@@ -285,6 +286,7 @@ const build = async () => {
 
         // new common references
         const newCommonRefs = (async () => (await newRefs).filter(commonFilter))()
+        const newPageRefs = (async () => (await newRefs).filter(pageFilter))()
 
         // Update references
         const updateRefHashes = (async () => {
@@ -304,7 +306,7 @@ const build = async () => {
                 await writeFile(getHashPath(r), fileHash)
               }
               if (r.startsWith('pages')) {
-                promises.push(writeRef)
+                promises.push(writeRef())
               } else {
                 if (!commonHashesWriting.has(r)) {
                   const promise = writeRef()
@@ -316,6 +318,13 @@ const build = async () => {
               }
             })
 
+          // Remove unused referenced files withing the same page folder
+          for (const oldRef of await oldPageRefs) {
+            if (!(await newPageRefs).includes(oldRef)) {
+              promises.push(unlink(getHashPath(oldRef)))
+            }
+          }
+
           // Wait for the promises
           await Promise.all(promises)
         })()
@@ -326,7 +335,8 @@ const build = async () => {
           const newHash = (async () => hash(await refsString))()
           const {
             hash: changedHash,
-            writePromise } = compareHash(newHash, referencesJsonHashPath, createPageDir, inputsChanged)
+            writePromise
+          } = compareHash(newHash, referencesJsonHashPath, createPageDir, inputsChanged)
           const writeJson = (async () => {
             if (await breakSecond(inputsChanged, changedHash)) {
               await createPageDir
