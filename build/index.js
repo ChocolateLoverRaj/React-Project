@@ -16,6 +16,7 @@ import hashFile from '../lib/helpers/hash-file.js'
 import firstTruthy from '../lib/helpers/first-truthy.js'
 import breakSecond from '../lib/helpers/break-second.js'
 import getHashPath from './hash-path.js'
+import commonFilter from './common-filter.js'
 
 // Npm Modules
 
@@ -28,7 +29,7 @@ import rollupStripPlugin from '@rollup/plugin-strip'
 import ReactServer from 'react-dom/server.node.js'
 
 // Node.js Modules
-import { readdir, writeFile, mkdir, readFile } from 'fs/promises'
+import { readdir, writeFile, mkdir, readFile, unlink } from 'fs/promises'
 import { join, relative } from 'path'
 
 const babelPlugin = rollupBabelPlugin.getBabelInputPlugin({
@@ -58,14 +59,18 @@ const build = async () => {
     // Map of hashes being written, so we can reuse them instead of redoing them
     const commonHashesWriting = new Map()
 
-    // Array of arrays of hashes referenced
-    const oldRefs = []
-    const newRefs = []
+    // Arrays of promises resolving arrays of old and new common refs
+    const oldCommonRefsPromises = []
+    const newCommonRefsPromises = []
 
     // Loop through all the pages
     for (const page of await libPagesDir) {
       // Add the individual page build to the page build promises
-      pageBuildPromises.push((async () => {
+      const {
+        build,
+        oldCommonRefs,
+        newCommonRefs
+      } = (() => {
         // The paths to the lib and dist page
         const libPagePath = join(libPagesPath, `./${page}/`)
         const distPagePath = join(distPagesPath, `./${page}/`)
@@ -107,16 +112,19 @@ const build = async () => {
         const createCommonRefHashesDir = mkdir(commonRefHashesPath, { recursive: true })
 
         // Read the refs
-        const previousRefs = (async () => {
+        const oldRefs = (async () => {
           const refString = readFile(referencesJsonPath)
           const refExists = await exists(refString)
           if (refExists) {
             const refs = JSON.parse(await refString)
             return refs
           } else {
-            return false
+            return []
           }
         })()
+
+        // The common previous refs
+        const oldCommonRefs = (async () => (await oldRefs).filter(commonFilter))()
 
         // Write the input hashes
         const {
@@ -154,18 +162,16 @@ const build = async () => {
           const inputsChanged = (async () => {
             // Add the inputJs file
             checkInput(inputJsPath, inputJsHashPath, createPageDir)
-            if (await previousRefs) {
-              for (const ref of await previousRefs) {
-                const refPath = join(libComponentsPath, ref)
-                const hashPath = getHashPath(ref)
-                if (ref.startsWith('pages')) {
-                  checkInput(refPath, hashPath, createPageRefHashesDir)
+            for (const ref of await oldRefs) {
+              const refPath = join(libComponentsPath, ref)
+              const hashPath = getHashPath(ref)
+              if (ref.startsWith('pages')) {
+                checkInput(refPath, hashPath, createPageRefHashesDir)
+              } else {
+                if (!commonRefs.has(ref)) {
+                  commonRefs.set(ref, checkInput(refPath, hashPath, createCommonRefHashesDir))
                 } else {
-                  if (!commonRefs.has(ref)) {
-                    commonRefs.set(ref, checkInput(refPath, hashPath, createCommonRefHashesDir))
-                  } else {
-                    addInput(commonRefs.get(ref))
-                  }
+                  addInput(commonRefs.get(ref))
                 }
               }
             }
@@ -253,11 +259,14 @@ const build = async () => {
           await Promise.all([writePromise, writeCode])
         })()
 
-        // Update references
-        const updateReferences = (async () => {
+        // new references
+        const newRefs = (async () => {
+          // Wait for inputsChanged first
+          if (!await inputsChanged) {
+            return oldRefs
+          }
           // Get the array of references
           const modules = (await instructionsJsOutput).modules
-          const skipRefs = await previousRefs || []
           const refs = Object.keys(modules)
             // Remove the main input
             .filter(v => v !== inputJsPath)
@@ -270,6 +279,18 @@ const build = async () => {
             }
           })
 
+          // Return refs
+          return refs
+        })()
+
+        // new common references
+        const newCommonRefs = (async () => (await newRefs).filter(commonFilter))()
+
+        // Update references
+        const updateRefHashes = (async () => {
+          // Get the array of references
+          const refs = await newRefs
+          const skipRefs = await oldRefs
           // The promises we need to wait for
           const promises = []
 
@@ -295,14 +316,25 @@ const build = async () => {
               }
             })
 
-          // TODO: Remove hashes of unreferenced files
-
           // Wait for the promises
           await Promise.all(promises)
         })()
 
-        // Only updates references if inputs have changed
-        const manageUpdateReferences = (async () => await breakSecond(inputsChanged, updateReferences))()
+        // Write refJson
+        const writeRefJson = (async () => {
+          const refsString = (async () => JSON.stringify(await newRefs))()
+          const newHash = (async () => hash(await refsString))()
+          const {
+            hash: changedHash,
+            writePromise } = compareHash(newHash, referencesJsonHashPath, createPageDir, inputsChanged)
+          const writeJson = (async () => {
+            if (await breakSecond(inputsChanged, changedHash)) {
+              await createPageDir
+              await writeFile(referencesJsonPath, await refsString)
+            }
+          })()
+          await Promise.all([writePromise, writeJson])
+        })()
 
         // Do the necessary steps to build appHtml
         // TODO: Build index.html too, and check if it has <App></App>
@@ -430,17 +462,45 @@ const build = async () => {
         }
 
         // Wait for the necessary tasks
-        await Promise.all([
+        const build = Promise.all([
           writeInputHashes,
           buildBrowserJs,
           buildInstructionsJs,
-          manageUpdateReferences
+          updateRefHashes,
+          writeRefJson
         ])
-      })())
+
+        // Return the necessary data
+        return {
+          build,
+          oldCommonRefs,
+          newCommonRefs
+        }
+      })()
+
+      pageBuildPromises.push(build)
+      oldCommonRefsPromises.push(oldCommonRefs)
+      newCommonRefsPromises.push(newCommonRefs)
     }
 
+    // Remove unused hashes
+    const removeUnusedHashes = (async () => {
+      const oldCommonRefs = new Set([].concat(...await Promise.all(oldCommonRefsPromises)))
+      const newCommonRefs = new Set([].concat(...await Promise.all(newCommonRefsPromises)))
+      const removePromises = []
+      for (const oldCommonRef of oldCommonRefs) {
+        if (!newCommonRefs.has(oldCommonRef)) {
+          removePromises.push(unlink(getHashPath(oldCommonRef)))
+        }
+      }
+      await Promise.all(removePromises)
+    })()
+
     // Wait for all the pages to be built
-    await Promise.all(pageBuildPromises)
+    await Promise.all([
+      ...pageBuildPromises,
+      removeUnusedHashes
+    ])
   })()
 
   // Await the promises
