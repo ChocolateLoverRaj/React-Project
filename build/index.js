@@ -27,9 +27,10 @@ import rollupStripPlugin from '@rollup/plugin-strip'
 
 // Other stuff
 import ReactServer from 'react-dom/server.node.js'
+import streamToString from 'stream-to-string'
 
 // Node.js Modules
-import { readdir, writeFile, mkdir, readFile, unlink } from 'fs/promises'
+import { readdir, writeFile, mkdir, readFile, unlink, link } from 'fs/promises'
 import { join, relative } from 'path'
 
 const babelPlugin = rollupBabelPlugin.getBabelInputPlugin({
@@ -97,6 +98,10 @@ const build = async () => {
         // The appHtml path
         const appHtmlPath = join(distPagePath, './app.html')
         const appHtmlHashPath = join(distPagePath, './app-html-hash.dat')
+
+        // The index.html paths
+        const libIndexHtmlPath = join(libPagePath, './index.html')
+        const distIndexHtmlPath = join(distPagePath, './index.html')
 
         // Whether or not the page exists in the dist pages dir
         const distPageExists = (async () => await distPagesExists && (await distPagesDir).includes(page))()
@@ -235,7 +240,11 @@ const build = async () => {
         })).output[0])()
 
         // Build instructions.js
-        const buildInstructionsJs = (async () => {
+        const {
+          writePromise: writeInstructionsJsHash,
+          writeCode: writeInstructionsJs,
+          changedHash: instructionsJsChanged
+        } = (() => {
           // Instructions code
           const instructionsJsCode = (async () => (await instructionsJsOutput).code)()
 
@@ -256,8 +265,11 @@ const build = async () => {
             }
           })()
 
-          // Wait for the hash and code to be written
-          await Promise.all([writePromise, writeCode])
+          return {
+            writePromise,
+            writeCode,
+            changedHash
+          }
         })()
 
         // new references
@@ -346,138 +358,56 @@ const build = async () => {
           await Promise.all([writePromise, writeJson])
         })()
 
-        // Do the necessary steps to build appHtml
-        // TODO: Build index.html too, and check if it has <App></App>
-        const buildAppHtml = async () => {
-          // Build referencesJson
-          const buildReferencesJson = (async () => {
-            // References string
-            const referencesString = (async () => {
-              // get the output modules
-              const instructionsJsModules = (await instructionsJsOutput).output[0].modules
+        // Build app html
+        const buildAppHtml = (async () => {
+          // If inputs or instructions don't change, then this couldn't've changed
+          const secondBreaker = breakSecond(inputsChanged, instructionsJsChanged)
 
-              // Check the modules
-              const references = []
-              for (const reference in instructionsJsModules) {
-                const goodPath = reference.startsWith(libPagePath) || reference.startsWith(libCommonPath)
-                if (goodPath) {
-                  if (reference !== inputJsPath) {
-                    references.push(relative(libComponentsPath, reference))
-                  }
-                } else {
-                  throw new Error('Reference found with a non common or page path.')
-                }
-              }
+          await writeInstructionsJs
+          const { default: app } = await import(getEsmPath(instructionsJsPath))
+          const htmlStream = ReactServer.renderToNodeStream(app)
+          const htmlString = streamToString(htmlStream)
+          const htmlHash = (async () => hash(await htmlString))()
 
-              // The referencesString
-              const referencesString = JSON.stringify(references)
-              return referencesString
-            })()
+          const {
+            hash: changedHash,
+            writePromise
+          } = compareHash(htmlHash, appHtmlHashPath, createPageDir, secondBreaker)
 
-            // The hash
-            const referencesHash = (async () => {
-              // The new hash
-              const newHash = (async () => hash(await referencesString))()
-
-              // The changedBuff
-              const changedBuff = getChangedBuffWithInputHash(newHash, referencesJsonHashPath)
-
-              // Return the hash to use
-              return await distPageExists
-                ? await changedBuff
-                : await newHash
-            })()
-
-            // Write the hash
-            const writeHash = (async () => {
-              const buff = await inputsChanged && await referencesHash
-              if (buff) {
-                console.log('changes', 'references.json', page)
-                await createPageDir
-                await writeFile(referencesJsonHashPath, buff)
-              } else {
-                console.log('no changes', 'references.json', page)
-              }
-            })()
-
-            // Write the referencesJson
-            const write = (async () => {
-              if (await inputsChanged && await referencesHash) {
-                await createPageDir
-                await writeFile(referencesJsonPath, await referencesString)
-              }
-            })()
-
-            // Wait for the hash and file to be written
-            await Promise.all([writeHash, write])
+          const writeAppHtml = (async () => {
+            if (await breakSecond(secondBreaker, changedHash)) {
+              await createPageDir
+              await writeFile(appHtmlPath, await htmlString)
+            }
           })()
 
-          // Build the appHtml
-          const buildAppHtml = (async () => {
-            // The actual html
-            const appHtml = (async () => {
-              await buildInstructionsJs
-              const { default: appComponent } = await import(getEsmPath(instructionsJsPath))
-              return ReactServer.renderToString(appComponent)
-            })()
 
-            // The hash
-            const appHtmlHash = (async () => {
-              // The new hash
-              const newHash = (async () => hash(await appHtml))()
+          await Promise.all([writePromise, writeAppHtml])
+        })()
 
-              // The changedBuff
-              const changedBuff = getChangedBuffWithInputHash(newHash, appHtmlHashPath)
-
-              // The hash to use
-              const hashToUse = (async () => await distPageExists
-                ? await changedBuff
-                : await newHash
-              )()
-
-              // Return the hash to use
-              return await hashToUse
-            })()
-
-            // Write the hash
-            const writeHash = (async () => {
-              const buff = await inputsChanged && await instructionsJsHash && await appHtmlHash
-              if (buff) {
-                console.log('changes', 'app.html', page)
-                await createPageDir
-                await writeFile(appHtmlHashPath, buff)
-              } else {
-                console.log('no changes', 'app.html', page)
-              }
-            })()
-
-            // Write the file
-            const writeAppHtml = (async () => {
-              if (await inputsChanged && await instructionsJsHash && await appHtmlHash) {
-                await createPageDir
-                await writeFile(appHtmlPath, await appHtml)
-              }
-            })()
-
-            // Wait for the hash and appHtml to be written
-            await Promise.all([writeHash, writeAppHtml])
-          })()
-
-          // Wait for the necessary tasks to be done
-          await Promise.all([
-            buildInstructionsJs,
-            buildReferencesJson,
-            buildAppHtml
-          ])
-        }
+        // Creates a hard link, index.html. This is a hard link to the page's index.html because nothing is changed, and we want it in the dist/ dir.
+        const linkIndexHtml = (async () => {
+          try {
+            await link(libIndexHtmlPath, distIndexHtmlPath)
+          } catch (e) {
+            // ENOENT is ok because all pages don't have to have an index.html file
+            // EEXIST is ok because that means it's already linked
+            if (!(e.code === 'ENOENT' || e.code === 'EEXIST')) {
+              throw e
+            }
+          }
+        })()
 
         // Wait for the necessary tasks
         const build = Promise.all([
           writeInputHashes,
           buildBrowserJs,
-          buildInstructionsJs,
+          writeInstructionsJsHash,
+          writeInstructionsJs,
           updateRefHashes,
-          writeRefJson
+          writeRefJson,
+          buildAppHtml,
+          linkIndexHtml
         ])
 
         // Return the necessary data

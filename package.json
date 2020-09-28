@@ -6,7 +6,7 @@
   "type": "module",
   "main": "./lib/server.js",
   "directories": {
-    "lib": "lib"
+    "lib": "./lib/"
   },
   "scripts": {
     "start": "node --experimental-modules --experimental-import-meta-resolve lib/server.js",
@@ -28,6 +28,7 @@
     "react": "^16.13.1",
     "react-dom": "^16.13.1",
     "rollup": "^2.26.11",
-    "standard": "^14.3.4"
+    "standard": "^14.3.4",
+    "stream-to-string": "^1.2.0"
   }
 }
