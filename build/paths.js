@@ -4,18 +4,35 @@ import { join } from 'path'
 
 const __dirname = getMyDirname(import.meta)
 
+// The browser paths
+const libBrowserPath = join(__dirname, '../lib/browser/')
+const distBrowserPath = join(__dirname, '../dist/browser/')
+
 // The components path
-export const libComponentsPath = join(__dirname, '../lib/browser/components')
-const distComponentsPath = join(__dirname, '../dist/browser/components')
+export const libComponentsPath = join(libBrowserPath, './components/')
+const distComponentsPath = join(distBrowserPath, './components/')
 
 // Where the input hashes are kept
 export const refHashesPath = join(distComponentsPath, './ref-hashes/')
 export const commonRefHashesPath = join(refHashesPath, './common/')
 export const pagesRefHashesPath = join(refHashesPath, './pages/')
 
-// The path to the lib common dir
-export const libCommonPath = join(libComponentsPath, './common/')
-
 // The paths to the lib and dist dirs
 export const libPagesPath = join(libComponentsPath, './pages/')
 export const distPagesPath = join(distComponentsPath, './pages/')
+
+// The template html paths
+const libBrowserHtmlPath = join(libBrowserPath, './html/')
+export const distBrowserHtmlPath = join(distBrowserPath, './html/')
+
+export const libTemplateHtmlPath = join(libBrowserHtmlPath, './template.html')
+export const distTemplateHtmlPath = join(distBrowserHtmlPath, './template.html')
+
+// The scripts paths
+const libBrowserScriptsPath = join(libBrowserPath, './scripts/')
+export const distBrowserScriptsPath = join(distBrowserPath, './scripts/')
+
+export const libReactPath = join(libBrowserScriptsPath, './react.js')
+export const distReactPath = join(distBrowserScriptsPath, './react.js')
+export const libReactDomPath = join(libBrowserScriptsPath, './react-dom.js')
+export const distReactDomPath = join(distBrowserScriptsPath, './react-dom.js')

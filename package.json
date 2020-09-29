@@ -24,11 +24,13 @@
     "@rollup/plugin-strip": "^2.0.0",
     "ansicolor": "^1.1.93",
     "chokidar": "^3.4.2",
+    "combined-stream": "^1.0.8",
     "express": "^4.17.1",
     "react": "^16.13.1",
     "react-dom": "^16.13.1",
     "rollup": "^2.26.11",
     "standard": "^14.3.4",
+    "stream-replace-string": "^1.0.0",
     "stream-to-string": "^1.2.0"
   }
 }

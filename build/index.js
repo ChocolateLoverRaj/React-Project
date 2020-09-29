@@ -1,14 +1,20 @@
 // My Modules
 import getEsmPath from '../lib/helpers/get-esm-path.js'
 import hash from '../lib/helpers/hash.js'
-import getChangedBuffWithInputHash from '../lib/helpers/get-changed-hash.js'
 import {
   libComponentsPath,
-  libCommonPath,
   libPagesPath,
   distPagesPath,
   commonRefHashesPath,
-  pagesRefHashesPath
+  pagesRefHashesPath,
+  distBrowserHtmlPath,
+  libTemplateHtmlPath,
+  distTemplateHtmlPath,
+  distBrowserScriptsPath,
+  distReactPath,
+  libReactPath,
+  libReactDomPath,
+  distReactDomPath
 } from './paths.js'
 import exists from '../lib/helpers/exists.js'
 import compareHash from './compare-hash.js'
@@ -17,6 +23,7 @@ import firstTruthy from '../lib/helpers/first-truthy.js'
 import breakSecond from '../lib/helpers/break-second.js'
 import getHashPath from './hash-path.js'
 import { commonFilter, pageFilter } from './ref-filters.js'
+import sureLink from './sure-link.js'
 
 // Npm Modules
 
@@ -387,7 +394,6 @@ const build = async () => {
 
         // Creates a hard link, head.html. This is a hard link to the head's index.html because nothing is changed, and we want it in the dist/ dir.
         const linkHeadHtml = (async () => {
-          console.log("linking head html", page)
           await createPageDir
           try {
             await link(libHeadHtmlPath, distHeadHtmlPath)
@@ -445,11 +451,28 @@ const build = async () => {
     ])
   })()
 
+  // Link browser html files
+  const linkBrowserHtmlFiles = (async () => {
+    await mkdir(distBrowserHtmlPath, { recursive: true })
+    await sureLink(libTemplateHtmlPath, distTemplateHtmlPath)
+  })()
+
+  // Link browser scripts files
+  const linkBrowserScriptsFiles = (async () => {
+    await mkdir(distBrowserScriptsPath, { recursive: true })
+    await Promise.all([
+      sureLink(libReactPath, distReactPath),
+      sureLink(libReactDomPath, distReactDomPath)
+    ])
+  })()
+
   // Await the promises
   await Promise.all([
     libPagesExists,
     distPagesExists,
-    buildPages
+    buildPages,
+    linkBrowserHtmlFiles,
+    linkBrowserScriptsFiles
   ]);
 
   // Lib and dist dirs error handlers
