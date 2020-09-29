@@ -100,8 +100,8 @@ const build = async () => {
         const appHtmlHashPath = join(distPagePath, './app-html-hash.dat')
 
         // The index.html paths
-        const libIndexHtmlPath = join(libPagePath, './index.html')
-        const distIndexHtmlPath = join(distPagePath, './index.html')
+        const libHeadHtmlPath = join(libPagePath, './head.html')
+        const distHeadHtmlPath = join(distPagePath, './head.html')
 
         // Whether or not the page exists in the dist pages dir
         const distPageExists = (async () => await distPagesExists && (await distPagesDir).includes(page))()
@@ -385,12 +385,14 @@ const build = async () => {
           await Promise.all([writePromise, writeAppHtml])
         })()
 
-        // Creates a hard link, index.html. This is a hard link to the page's index.html because nothing is changed, and we want it in the dist/ dir.
-        const linkIndexHtml = (async () => {
+        // Creates a hard link, head.html. This is a hard link to the head's index.html because nothing is changed, and we want it in the dist/ dir.
+        const linkHeadHtml = (async () => {
+          console.log("linking head html", page)
+          await createPageDir
           try {
-            await link(libIndexHtmlPath, distIndexHtmlPath)
+            await link(libHeadHtmlPath, distHeadHtmlPath)
           } catch (e) {
-            // ENOENT is ok because all pages don't have to have an index.html file
+            // ENOENT is ok because all pages don't have to have an head.html file
             // EEXIST is ok because that means it's already linked
             if (!(e.code === 'ENOENT' || e.code === 'EEXIST')) {
               throw e
@@ -407,7 +409,7 @@ const build = async () => {
           updateRefHashes,
           writeRefJson,
           buildAppHtml,
-          linkIndexHtml
+          linkHeadHtml
         ])
 
         // Return the necessary data
