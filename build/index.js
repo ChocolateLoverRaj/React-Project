@@ -2,6 +2,7 @@
 import getEsmPath from '../lib/helpers/get-esm-path.js'
 import hash from '../lib/helpers/hash.js'
 import {
+  distBrowserPath,
   libComponentsPath,
   libPagesPath,
   distPagesPath,
@@ -14,7 +15,8 @@ import {
   distReactPath,
   libReactPath,
   libReactDomPath,
-  distReactDomPath
+  distReactDomPath,
+  buildJsonPath
 } from './paths.js'
 import exists from '../lib/helpers/exists.js'
 import compareHash from './compare-hash.js'
@@ -71,13 +73,19 @@ const build = async () => {
     const oldCommonRefsPromises = []
     const newCommonRefsPromises = []
 
+    // The build.json file
+    const buildJson = []
+    // The promises to wait for before writing buildJson
+    const buildJsonPromises = []
+
     // Loop through all the pages
     for (const page of await libPagesDir) {
       // Add the individual page build to the page build promises
       const {
         build,
         oldCommonRefs,
-        newCommonRefs
+        newCommonRefs,
+        linkHeadHtml
       } = (() => {
         // The paths to the lib and dist page
         const libPagePath = join(libPagesPath, `./${page}/`)
@@ -109,6 +117,10 @@ const build = async () => {
         // The index.html paths
         const libHeadHtmlPath = join(libPagePath, './head.html')
         const distHeadHtmlPath = join(distPagePath, './head.html')
+
+        // Add this page to the buildJson
+        const pageJson = { page }
+        buildJson.push(pageJson)
 
         // Whether or not the page exists in the dist pages dir
         const distPageExists = (async () => await distPagesExists && (await distPagesDir).includes(page))()
@@ -388,7 +400,6 @@ const build = async () => {
             }
           })()
 
-
           await Promise.all([writePromise, writeAppHtml])
         })()
 
@@ -397,11 +408,19 @@ const build = async () => {
           await createPageDir
           try {
             await link(libHeadHtmlPath, distHeadHtmlPath)
+            pageJson.head = true
           } catch (e) {
             // ENOENT is ok because all pages don't have to have an head.html file
             // EEXIST is ok because that means it's already linked
-            if (!(e.code === 'ENOENT' || e.code === 'EEXIST')) {
-              throw e
+            switch (e.code) {
+              case 'ENOENT':
+                pageJson.head = false
+                break
+              case 'EEXIST':
+                pageJson.head = true
+                break
+              default:
+                throw e
             }
           }
         })()
@@ -422,13 +441,15 @@ const build = async () => {
         return {
           build,
           oldCommonRefs,
-          newCommonRefs
+          newCommonRefs,
+          linkHeadHtml
         }
       })()
 
       pageBuildPromises.push(build)
       oldCommonRefsPromises.push(oldCommonRefs)
       newCommonRefsPromises.push(newCommonRefs)
+      buildJsonPromises.push(linkHeadHtml)
     }
 
     // Remove unused hashes
@@ -444,10 +465,18 @@ const build = async () => {
       await Promise.all(removePromises)
     })()
 
+    // Write build.json
+    const writeBuildJson = (async () => {
+      await mkdir(distBrowserPath, { recursive: true })
+      await Promise.all(buildJsonPromises)
+      await writeFile(buildJsonPath, JSON.stringify(buildJson))
+    })()
+
     // Wait for all the pages to be built
     await Promise.all([
       ...pageBuildPromises,
-      removeUnusedHashes
+      removeUnusedHashes,
+      writeBuildJson
     ])
   })()
 

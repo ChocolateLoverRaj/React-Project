@@ -6,7 +6,7 @@ const __dirname = getMyDirname(import.meta)
 
 // The browser paths
 const libBrowserPath = join(__dirname, '../lib/browser/')
-const distBrowserPath = join(__dirname, '../dist/browser/')
+export const distBrowserPath = join(__dirname, '../dist/browser/')
 
 // The components path
 export const libComponentsPath = join(libBrowserPath, './components/')
@@ -36,3 +36,6 @@ export const libReactPath = join(libBrowserScriptsPath, './react.js')
 export const distReactPath = join(distBrowserScriptsPath, './react.js')
 export const libReactDomPath = join(libBrowserScriptsPath, './react-dom.js')
 export const distReactDomPath = join(distBrowserScriptsPath, './react-dom.js')
+
+// The build.json path
+export const buildJsonPath = join(distBrowserPath, './build.json')
