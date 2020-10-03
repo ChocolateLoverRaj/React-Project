@@ -229,7 +229,8 @@ const build = async () => {
             format: 'es',
             paths: {
               react: '/scripts/react.js'
-            }
+            },
+            footer: 'window.ReactDOM.hydrate(app, document.getElementById(\'app\'))'
           })).output[0].code)()
 
           // The new hash
