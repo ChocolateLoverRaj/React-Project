@@ -34,8 +34,6 @@ export const distBrowserScriptsPath = join(distBrowserPath, './scripts/')
 
 export const libReactPath = join(libBrowserScriptsPath, './react.js')
 export const distReactPath = join(distBrowserScriptsPath, './react.js')
-export const libReactDomPath = join(libBrowserScriptsPath, './react-dom.js')
-export const distReactDomPath = join(distBrowserScriptsPath, './react-dom.js')
 
 // The build.json path
 export const buildJsonPath = join(distBrowserPath, './build.json')

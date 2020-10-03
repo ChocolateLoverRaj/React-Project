@@ -14,8 +14,6 @@ import {
   distBrowserScriptsPath,
   distReactPath,
   libReactPath,
-  libReactDomPath,
-  distReactDomPath,
   buildJsonPath
 } from './paths.js'
 import exists from '../lib/helpers/exists.js'
@@ -490,10 +488,7 @@ const build = async () => {
   // Link browser scripts files
   const linkBrowserScriptsFiles = (async () => {
     await mkdir(distBrowserScriptsPath, { recursive: true })
-    await Promise.all([
-      sureLink(libReactPath, distReactPath),
-      sureLink(libReactDomPath, distReactDomPath)
-    ])
+    await sureLink(libReactPath, distReactPath)
   })()
 
   // Await the promises
