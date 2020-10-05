@@ -72,9 +72,22 @@ const build = async () => {
     const newCommonRefsPromises = []
 
     // The build.json file
-    const buildJson = []
+    const buildJson = {}
     // The promises to wait for before writing buildJson
     const buildJsonPromises = []
+
+    // The previous buildJson, if it exists
+    const oldBuildJson = (async () => {
+      try {
+        return JSON.parse(await readFile(buildJsonPath))
+      } catch (e) {
+        if (e.code === 'ENOENT') {
+          return {}
+        } else {
+          throw e
+        }
+      }
+    })()
 
     // Loop through all the pages
     for (const page of await libPagesDir) {
@@ -83,7 +96,7 @@ const build = async () => {
         build,
         oldCommonRefs,
         newCommonRefs,
-        linkHeadHtml
+        editBuildJson
       } = (() => {
         // The paths to the lib and dist page
         const libPagePath = join(libPagesPath, `./${page}/`)
@@ -95,10 +108,6 @@ const build = async () => {
         // The file paths in the page
         const inputJsPath = join(libPagePath, './index.js')
         const inputJsHashPath = join(distPagePath, './input-js-hash.dat')
-
-        // The references paths
-        const referencesJsonPath = join(distPagePath, './references.json')
-        const referencesJsonHashPath = join(distPagePath, './references-json-hash.dat')
 
         // The browserJs path
         const browserJsPath = join(distPagePath, './browser.js')
@@ -117,8 +126,10 @@ const build = async () => {
         const distHeadHtmlPath = join(distPagePath, './head.html')
 
         // Add this page to the buildJson
-        const pageJson = { page }
-        buildJson.push(pageJson)
+        const pageJson = buildJson[page] = {}
+
+        // The previous pageJson, may not exist
+        const oldPageJson = (async () => (await oldBuildJson)[page])()
 
         // Whether or not the page exists in the dist pages dir
         const distPageExists = (async () => await distPagesExists && (await distPagesDir).includes(page))()
@@ -134,16 +145,7 @@ const build = async () => {
         const createCommonRefHashesDir = mkdir(commonRefHashesPath, { recursive: true })
 
         // Read the refs
-        const oldRefs = (async () => {
-          const refString = readFile(referencesJsonPath)
-          const refExists = await exists(refString)
-          if (refExists) {
-            const refs = JSON.parse(await refString)
-            return refs
-          } else {
-            return []
-          }
-        })()
+        const oldRefs = (async () => (await oldPageJson)?.refs || [])()
 
         // The common previous refs
         const oldCommonRefs = (async () => (await oldRefs).filter(commonFilter))()
@@ -360,20 +362,8 @@ const build = async () => {
         })()
 
         // Write refJson
-        const writeRefJson = (async () => {
-          const refsString = (async () => JSON.stringify(await newRefs))()
-          const newHash = (async () => hash(await refsString))()
-          const {
-            hash: changedHash,
-            writePromise
-          } = compareHash(newHash, referencesJsonHashPath, createPageDir, inputsChanged)
-          const writeJson = (async () => {
-            if (await breakSecond(inputsChanged, changedHash)) {
-              await createPageDir
-              await writeFile(referencesJsonPath, await refsString)
-            }
-          })()
-          await Promise.all([writePromise, writeJson])
+        const pageJsonRefs = (async () => {
+          pageJson.refs = await newRefs
         })()
 
         // Build app html
@@ -424,6 +414,12 @@ const build = async () => {
           }
         })()
 
+        // Everything that edits build.json
+        const editBuildJson = Promise.all([
+          linkHeadHtml,
+          pageJsonRefs
+        ])
+
         // Wait for the necessary tasks
         const build = Promise.all([
           writeInputHashes,
@@ -431,7 +427,7 @@ const build = async () => {
           writeInstructionsJsHash,
           writeInstructionsJs,
           updateRefHashes,
-          writeRefJson,
+          pageJsonRefs,
           buildAppHtml,
           linkHeadHtml
         ])
@@ -441,14 +437,14 @@ const build = async () => {
           build,
           oldCommonRefs,
           newCommonRefs,
-          linkHeadHtml
+          editBuildJson
         }
       })()
 
       pageBuildPromises.push(build)
       oldCommonRefsPromises.push(oldCommonRefs)
       newCommonRefsPromises.push(newCommonRefs)
-      buildJsonPromises.push(linkHeadHtml)
+      buildJsonPromises.push(editBuildJson)
     }
 
     // Remove unused hashes
